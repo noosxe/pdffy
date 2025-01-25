@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -10,6 +11,10 @@ import (
 	"strings"
 	"unicode"
 )
+
+type Questionnaire struct {
+	Questions []Question `json:"questions"`
+}
 
 type Question struct {
 	Text    string   `json:"text"`
@@ -48,6 +53,7 @@ func main() {
 	fmt.Print("pdffy ======== not sure why?\n\n")
 
 	fileFlag := flag.String("f", "", "input xml file")
+	outFlag := flag.String("o", "", "output json file")
 	flag.Parse()
 
 	if len(*fileFlag) == 0 {
@@ -80,11 +86,6 @@ func main() {
 	questions := make([]Question, 0)
 
 	for _, page := range xmlDoc.Pages {
-		fmt.Printf("\npage: %d\n", page.Number)
-		fmt.Printf("images: %d\n", len(page.Images))
-		fmt.Printf("texts: %d\n", len(page.Texts))
-
-		// var question Question
 		var sb strings.Builder
 		var i int
 		var question Question
@@ -96,14 +97,12 @@ func main() {
 				i += 1
 				continue
 			}
-			fmt.Printf("-- %s\n", clean)
 
 			runes := []rune(clean)
 
 			first := runes[0]
 
 			if unicode.IsDigit(first) {
-				fmt.Printf("found digit: %v\n", first)
 				second := runes[1]
 
 				if second == '.' {
@@ -111,11 +110,7 @@ func main() {
 						q := sb.String()
 						sb.Reset()
 						question.Text = q
-						fmt.Printf("acc: %s\n", q)
-
 						waitingForQ = false
-						fmt.Println("not waiting for Q")
-
 						sb.WriteString(clean)
 					} else {
 						question.Options = append(question.Options, sb.String())
@@ -148,7 +143,6 @@ func main() {
 					questions = append(questions, question)
 					question = Question{}
 					waitingForQ = true
-					fmt.Println("waiting for Q")
 
 					i += 3
 					continue
@@ -163,5 +157,28 @@ func main() {
 		}
 	}
 
-	fmt.Println(questions)
+	if *outFlag != "" {
+		fmt.Printf("writing output to: %s\n", *outFlag)
+		questionnaire := Questionnaire{Questions: questions}
+		jstring, err := json.Marshal(questionnaire)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		f, err := os.Create(*outFlag)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer f.Close()
+
+		_, err = f.Write(jstring)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Println(questions)
+	}
 }
