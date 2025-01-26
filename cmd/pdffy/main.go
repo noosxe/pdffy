@@ -20,6 +20,7 @@ type Questionnaire struct {
 }
 
 type Question struct {
+	Id      string   `json:"id"`
 	Text    string   `json:"text"`
 	Image   *string  `json:"image,omitempty"`
 	Options []string `json:"options"`
@@ -86,8 +87,8 @@ func main() {
 	}
 
 	allQuestions := make([]Question, 0)
-	for _, file := range files {
-		questions, err := ProcessFile(file)
+	for i, file := range files {
+		questions, err := ProcessFile(file, fmt.Sprintf("Book %d", i+1))
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -121,7 +122,7 @@ func main() {
 	}
 }
 
-func ProcessFile(filePath string) ([]Question, error) {
+func ProcessFile(filePath string, idPrefix string) ([]Question, error) {
 	fmt.Printf("trying to open %s\n", filePath)
 	xmlFile, err := os.Open(filePath)
 	if err != nil {
@@ -141,12 +142,13 @@ func ProcessFile(filePath string) ([]Question, error) {
 	}
 
 	questions := make([]Question, 0)
-	for _, page := range xmlDoc.Pages {
+	for i, page := range xmlDoc.Pages {
 		texts := SanitizeTexts(page.Texts)
 
 		var question Question
 		var sb strings.Builder
 		var rect Rect
+		var iQ int
 		machine := stm.StateMachine[Text]{}
 		machine.Init(texts).
 			AddState(stm.State[Text]{
@@ -244,10 +246,12 @@ func ProcessFile(filePath string) ([]Question, error) {
 							question.Image = &img.Src
 						}
 					}
+					question.Id = fmt.Sprintf("%s, Page %d, Question %d", idPrefix, i+1, iQ+1)
 
 					questions = append(questions, question)
 					question = Question{}
 					rect = Rect{}
+					iQ++
 					return stm.Next("first")
 				},
 			})
