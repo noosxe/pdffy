@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/noosxe/pdffy/pkg/stm"
 )
 
 type Questionnaire struct {
@@ -98,12 +100,12 @@ func main() {
 		var question Question
 		var sb strings.Builder
 		var rect Rect
-		machine := StateMachine[Text]{}
+		machine := stm.StateMachine[Text]{}
 		machine.Init(texts).
-			AddState(State[Text]{
+			AddState(stm.State[Text]{
 				First: true,
 				Name:  "first",
-				Run: func(value Text, stm *StateMachine[Text]) error {
+				Run: func(value Text, stm *stm.StateMachine[Text]) error {
 					if sb.Len() > 0 {
 						sb.WriteRune(' ')
 					}
@@ -127,9 +129,9 @@ func main() {
 					return stm.Next("first")
 				},
 			}).
-			AddState(State[Text]{
+			AddState(stm.State[Text]{
 				Name: "option",
-				Run: func(value Text, stm *StateMachine[Text]) error {
+				Run: func(value Text, stm *stm.StateMachine[Text]) error {
 					fmt.Println(value.Content)
 
 					next, err := stm.Token(1)
@@ -159,9 +161,9 @@ func main() {
 					return stm.Next("option")
 				},
 			}).
-			AddState(State[Text]{
+			AddState(stm.State[Text]{
 				Name: "answer",
-				Run: func(value Text, stm *StateMachine[Text]) error {
+				Run: func(value Text, stm *stm.StateMachine[Text]) error {
 					next, err := stm.Token(1)
 					if err != nil {
 						return err
@@ -281,81 +283,4 @@ func SanitizeTexts(texts []Text) []Text {
 
 func IsInRect(rect Rect, image Image) bool {
 	return image.Left > rect.Left && image.Top > rect.Top && (image.Left+image.Width) < rect.Right && (image.Top+image.Height) < rect.Bottom
-}
-
-type Token[T any] struct {
-	Value T
-}
-
-type State[T any] struct {
-	Name  string
-	First bool
-	Run   func(value T, stm *StateMachine[T]) error
-}
-
-type StateMachine[T any] struct {
-	tokens       []Token[T]
-	states       map[string]State[T]
-	currentState string
-	position     int
-}
-
-func (stm *StateMachine[T]) Init(values []T) *StateMachine[T] {
-	stm.tokens = make([]Token[T], len(values))
-	for i, value := range values {
-		stm.tokens[i] = Token[T]{Value: value}
-	}
-	stm.states = make(map[string]State[T])
-	return stm
-}
-
-func (stm *StateMachine[T]) AddState(state State[T]) *StateMachine[T] {
-	stm.states[state.Name] = state
-	if state.First {
-		stm.currentState = state.Name
-	}
-	return stm
-}
-
-func (stm *StateMachine[T]) Parse() error {
-	for stm.position < len(stm.tokens) {
-		current, ok := stm.states[stm.currentState]
-		if !ok {
-			return fmt.Errorf("[%s] state not found", stm.currentState)
-		}
-
-		fmt.Printf("[%s] state goes next\n", stm.currentState)
-		err := current.Run(stm.tokens[stm.position].Value, stm)
-		if err != nil {
-			return err
-		}
-	}
-
-	fmt.Println("all tokens parsed")
-
-	return nil
-}
-
-func (stm *StateMachine[T]) Next(name string) error {
-	_, ok := stm.states[name]
-	if !ok {
-		return fmt.Errorf("[%v] state not found", name)
-	}
-
-	stm.currentState = name
-	stm.position += 1
-	return nil
-}
-
-func (stm *StateMachine[T]) Token(delta int) (*Token[T], error) {
-	pos := stm.position + delta
-	if pos < 0 || pos >= len(stm.tokens) {
-		return nil, fmt.Errorf("%d is out bounds", stm.position+delta)
-	}
-
-	return &stm.tokens[pos], nil
-}
-
-func (stm *StateMachine[T]) Consume(count int) {
-	stm.position += count
 }
