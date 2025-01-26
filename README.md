@@ -8,5 +8,5 @@ generates a json version of it.
 ## Usage
 
 ```sh
-go run main.go -f input.xml -o output.json
+go run main.go -file input1.xml -file input2.xml -o output.json
 ```

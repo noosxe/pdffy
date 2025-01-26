@@ -59,38 +59,85 @@ type Rect struct {
 	Right  int
 }
 
+type MultiFile []string
+
+func (mf *MultiFile) Set(value string) error {
+	*mf = append(*mf, value)
+	return nil
+}
+
+func (mf *MultiFile) String() string {
+	return strings.Join(*mf, ", ")
+}
+
 func main() {
 	fmt.Print("pdffy ======== not sure why?\n\n")
 
-	fileFlag := flag.String("f", "", "input xml file")
+	var files MultiFile
+	flag.Var(&files, "file", "input xml file")
 	outFlag := flag.String("o", "", "output json file")
 	flag.Parse()
 
-	if len(*fileFlag) == 0 {
+	fmt.Println(files)
+
+	if len(files) == 0 {
 		fmt.Println("please provide the input file path")
 		os.Exit(1)
 	}
 
-	fileArg := *fileFlag
-	fmt.Printf("trying to open %s\n", fileArg)
-	xmlFile, err := os.Open(fileArg)
+	allQuestions := make([]Question, 0)
+	for _, file := range files {
+		questions, err := ProcessFile(file)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		allQuestions = append(allQuestions, questions...)
+	}
+
+	if *outFlag != "" {
+		fmt.Printf("writing output to: %s\n", *outFlag)
+		questionnaire := Questionnaire{Questions: allQuestions}
+		jstring, err := json.Marshal(questionnaire)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		f, err := os.Create(*outFlag)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer f.Close()
+
+		_, err = f.Write(jstring)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Println(allQuestions)
+	}
+}
+
+func ProcessFile(filePath string) ([]Question, error) {
+	fmt.Printf("trying to open %s\n", filePath)
+	xmlFile, err := os.Open(filePath)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, err
 	}
 	defer xmlFile.Close()
 
 	byteValue, err := io.ReadAll(xmlFile)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	var xmlDoc XmlDoc
 	err = xml.Unmarshal(byteValue, &xmlDoc)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	questions := make([]Question, 0)
@@ -207,35 +254,11 @@ func main() {
 
 		err = machine.Parse()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return nil, err
 		}
 	}
 
-	if *outFlag != "" {
-		fmt.Printf("writing output to: %s\n", *outFlag)
-		questionnaire := Questionnaire{Questions: questions}
-		jstring, err := json.Marshal(questionnaire)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		f, err := os.Create(*outFlag)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		defer f.Close()
-
-		_, err = f.Write(jstring)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Println(questions)
-	}
+	return questions, nil
 }
 
 func IsOption(text Text) bool {
@@ -245,8 +268,9 @@ func IsOption(text Text) bool {
 		return false
 	}
 
-	second := runes[1]
-	return second == '.'
+	return true
+	// second := runes[1]
+	// return second == '.'
 }
 
 func IsAnswer(text Text) bool {
