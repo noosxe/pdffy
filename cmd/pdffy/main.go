@@ -141,7 +141,7 @@ func main() {
 
 					if IsOption(value) {
 						if sb.Len() > 0 {
-							question.Options = append(question.Options, sb.String())
+							question.Options = append(question.Options, sb.String()[2:])
 							sb.Reset()
 						}
 					}
@@ -151,7 +151,7 @@ func main() {
 
 					if IsAnswer(next.Value) {
 						if sb.Len() > 0 {
-							question.Options = append(question.Options, sb.String())
+							question.Options = append(question.Options, sb.String()[2:])
 							sb.Reset()
 						}
 
@@ -191,7 +191,7 @@ func main() {
 					if err != nil {
 						return err
 					}
-					question.Answer = ansNum
+					question.Answer = ansNum - 1
 					for _, img := range page.Images {
 						if IsInRect(rect, img) {
 							question.Image = &img.Src
