@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -49,6 +50,13 @@ type Text struct {
 	Content string `xml:",chardata"`
 }
 
+type Rect struct {
+	Top    int
+	Bottom int
+	Left   int
+	Right  int
+}
+
 func main() {
 	fmt.Print("pdffy ======== not sure why?\n\n")
 
@@ -84,76 +92,121 @@ func main() {
 	}
 
 	questions := make([]Question, 0)
-
 	for _, page := range xmlDoc.Pages {
-		var sb strings.Builder
-		var i int
+		texts := SanitizeTexts(page.Texts)
+
 		var question Question
-		waitingForQ := true
-		for i < len(page.Texts) {
-			text := page.Texts[i]
-			clean := strings.TrimSpace(text.Content)
-			if len(clean) == 0 {
-				i += 1
-				continue
-			}
+		var sb strings.Builder
+		var rect Rect
+		machine := StateMachine[Text]{}
+		machine.Init(texts).
+			AddState(State[Text]{
+				First: true,
+				Name:  "first",
+				Run: func(value Text, stm *StateMachine[Text]) error {
+					if sb.Len() > 0 {
+						sb.WriteRune(' ')
+					}
 
-			runes := []rune(clean)
+					sb.WriteString(value.Content)
+					fmt.Println(value.Content)
 
-			first := runes[0]
+					next, err := stm.Token(1)
+					if err != nil {
+						return err
+					}
+					rect = ExpandRect(rect, value)
 
-			if unicode.IsDigit(first) {
-				second := runes[1]
-
-				if second == '.' {
-					if waitingForQ {
+					if IsOption(next.Value) {
 						q := sb.String()
 						sb.Reset()
 						question.Text = q
-						waitingForQ = false
-						sb.WriteString(clean)
-					} else {
-						question.Options = append(question.Options, sb.String())
-						sb.Reset()
-						sb.WriteString(clean)
-					}
-				}
-			} else {
-				if clean == "Պատ" {
-					if sb.Len() > 0 {
-						question.Options = append(question.Options, sb.String())
-						sb.Reset()
+						return stm.Next("option")
 					}
 
-					ans := page.Texts[i+2]
-					ansRunes := []rune(ans.Content)
+					return stm.Next("first")
+				},
+			}).
+			AddState(State[Text]{
+				Name: "option",
+				Run: func(value Text, stm *StateMachine[Text]) error {
+					fmt.Println(value.Content)
 
-					if ansRunes[0] != '՝' {
-						fmt.Printf("expected the tick but got: %v", ansRunes[0])
-						os.Exit(1)
-					}
-
-					ansNum, err := strconv.Atoi(string(ansRunes[1]))
+					next, err := stm.Token(1)
 					if err != nil {
-						fmt.Printf("deceptive number i see: %s\n", ans.Content)
-						os.Exit(1)
+						return err
 					}
 
+					if IsOption(value) {
+						if sb.Len() > 0 {
+							question.Options = append(question.Options, sb.String())
+							sb.Reset()
+						}
+					}
+					rect = ExpandRect(rect, value)
+
+					sb.WriteString(value.Content)
+
+					if IsAnswer(next.Value) {
+						if sb.Len() > 0 {
+							question.Options = append(question.Options, sb.String())
+							sb.Reset()
+						}
+
+						return stm.Next("answer")
+					}
+
+					return stm.Next("option")
+				},
+			}).
+			AddState(State[Text]{
+				Name: "answer",
+				Run: func(value Text, stm *StateMachine[Text]) error {
+					next, err := stm.Token(1)
+					if err != nil {
+						return err
+					}
+
+					runes := []rune(next.Value.Content)
+					if runes[0] != '․' {
+						return fmt.Errorf("unexpected token in answer section: %s", next.Value.Content)
+					}
+					stm.Consume(1)
+
+					next, err = stm.Token(1)
+					if err != nil {
+						return err
+					}
+
+					runes = []rune(next.Value.Content)
+					if runes[0] != '՝' {
+						return fmt.Errorf("unexpected token in answer section: %s", next.Value.Content)
+					}
+					stm.Consume(1)
+
+					fmt.Println(string(runes[1]))
+					ansNum, err := strconv.Atoi(string(runes[1]))
+					if err != nil {
+						return err
+					}
 					question.Answer = ansNum
+					for _, img := range page.Images {
+						if IsInRect(rect, img) {
+							question.Image = &img.Src
+						}
+					}
+
 					questions = append(questions, question)
 					question = Question{}
-					waitingForQ = true
+					rect = Rect{}
+					return stm.Next("first")
+				},
+			})
 
-					i += 3
-					continue
-				}
-
-				sb.WriteRune(' ')
-				sb.WriteString(clean)
-			}
-
-			i++
-
+		err = machine.Parse()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
 		}
 	}
 
@@ -181,4 +234,128 @@ func main() {
 	} else {
 		fmt.Println(questions)
 	}
+}
+
+func IsOption(text Text) bool {
+	runes := []rune(text.Content)
+	first := runes[0]
+	if !unicode.IsDigit(first) {
+		return false
+	}
+
+	second := runes[1]
+	return second == '.'
+}
+
+func IsAnswer(text Text) bool {
+	return text.Content == "Պատ"
+}
+
+func ExpandRect(rect Rect, text Text) Rect {
+	if rect.Top == 0 || text.Top < rect.Top {
+		rect.Top = text.Top
+	}
+
+	if rect.Left == 0 || text.Left < rect.Left {
+		rect.Left = text.Left
+	}
+
+	rect.Bottom = int(math.Max(float64(rect.Bottom), float64(text.Top)+float64(text.Height)))
+	rect.Right = int(math.Max(float64(rect.Right), float64(text.Left)+float64(text.Width)))
+
+	return rect
+}
+
+func SanitizeTexts(texts []Text) []Text {
+	var result []Text
+
+	for _, text := range texts {
+		text.Content = strings.TrimSpace(text.Content)
+		if text.Content != "" {
+			result = append(result, text)
+		}
+	}
+
+	return result
+}
+
+func IsInRect(rect Rect, image Image) bool {
+	return image.Left > rect.Left && image.Top > rect.Top && (image.Left+image.Width) < rect.Right && (image.Top+image.Height) < rect.Bottom
+}
+
+type Token[T any] struct {
+	Value T
+}
+
+type State[T any] struct {
+	Name  string
+	First bool
+	Run   func(value T, stm *StateMachine[T]) error
+}
+
+type StateMachine[T any] struct {
+	tokens       []Token[T]
+	states       map[string]State[T]
+	currentState string
+	position     int
+}
+
+func (stm *StateMachine[T]) Init(values []T) *StateMachine[T] {
+	stm.tokens = make([]Token[T], len(values))
+	for i, value := range values {
+		stm.tokens[i] = Token[T]{Value: value}
+	}
+	stm.states = make(map[string]State[T])
+	return stm
+}
+
+func (stm *StateMachine[T]) AddState(state State[T]) *StateMachine[T] {
+	stm.states[state.Name] = state
+	if state.First {
+		stm.currentState = state.Name
+	}
+	return stm
+}
+
+func (stm *StateMachine[T]) Parse() error {
+	for stm.position < len(stm.tokens) {
+		current, ok := stm.states[stm.currentState]
+		if !ok {
+			return fmt.Errorf("[%s] state not found", stm.currentState)
+		}
+
+		fmt.Printf("[%s] state goes next\n", stm.currentState)
+		err := current.Run(stm.tokens[stm.position].Value, stm)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("all tokens parsed")
+
+	return nil
+}
+
+func (stm *StateMachine[T]) Next(name string) error {
+	_, ok := stm.states[name]
+	if !ok {
+		return fmt.Errorf("[%v] state not found", name)
+	}
+
+	stm.currentState = name
+	stm.position += 1
+	return nil
+}
+
+func (stm *StateMachine[T]) Token(delta int) (*Token[T], error) {
+	pos := stm.position + delta
+	if pos < 0 || pos >= len(stm.tokens) {
+		return nil, fmt.Errorf("%d is out bounds", stm.position+delta)
+	}
+
+	return &stm.tokens[pos], nil
+}
+
+func (stm *StateMachine[T]) Consume(count int) {
+	stm.position += count
 }
