@@ -99,7 +99,7 @@ func main() {
 	if *outFlag != "" {
 		fmt.Printf("writing output to: %s\n", *outFlag)
 		questionnaire := Questionnaire{Questions: allQuestions}
-		jstring, err := json.Marshal(questionnaire)
+		jstring, err := json.MarshalIndent(questionnaire, "", "  ")
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
