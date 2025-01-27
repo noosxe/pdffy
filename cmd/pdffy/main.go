@@ -196,6 +196,10 @@ func ProcessFile(filePath string, idPrefix string) ([]Question, error) {
 					}
 					rect = ExpandRect(rect, value)
 
+					if sb.Len() > 0 {
+						sb.WriteRune(' ')
+					}
+
 					sb.WriteString(value.Content)
 
 					if IsAnswer(next.Value) {
